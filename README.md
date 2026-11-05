@@ -10,6 +10,47 @@ A production-style email scheduler and dashboard. Express + BullMQ + Redis + Pos
 
 ---
 
+## Features implemented
+
+Each row maps an assignment requirement to where it lives and how it was verified.
+
+### Backend
+
+| Requirement | Implementation | Where | Verified by |
+|---|---|---|---|
+| Accept scheduling requests via API | `POST /api/campaigns`: zod validation, recipient normalization and de-duplication, `Idempotency-Key` | `backend/src/modules/campaigns` | integration test (c) |
+| Store in a relational DB | PostgreSQL 16 + Prisma; one transaction per campaign plus its email rows | `backend/prisma/schema.prisma` | all tests |
+| **Scheduler** with BullMQ delayed jobs, no cron | One delayed job per email, `jobId = email-{id}`; pure planner spreads emails across hours; maintenance is a self-rescheduling delayed job | `backend/src/scheduler/planner.ts`, `backend/src/worker/` | planner unit tests, `e2e:restart` |
+| Multiple senders via Ethereal SMTP | Pool of `SENDER_COUNT` Ethereal accounts created at boot; round-robin or a chosen sender; pooled SMTP per sender | `backend/src/modules/senders`, `backend/src/mail` | live sends with Ethereal preview links |
+| **Persistence** across restarts | Postgres as source of truth, Redis AOF + `noeviction`, `reconcile()` rebuilds jobs from Postgres after data loss | `backend/src/worker/reconcile.ts`, `docker-compose.yml` | `e2e:restart`, `e2e:redis` |
+| **No duplicate sends** (idempotency) | API idempotency key, deterministic job IDs, atomic `UPDATE … WHERE status='scheduled'` claim, at-most-once crash policy | `backend/src/worker/emailState.ts` | integration tests (a), (b), (c); `e2e:two-workers` |
+| **Worker concurrency** | `WORKER_CONCURRENCY` (default 5) per process; any number of worker processes | `backend/src/worker/worker.ts` | `e2e:two-workers` |
+| **Minimum delay between sends** | Per-sender slot reservation in Redis (default 2 s), holds across processes | `backend/src/ratelimit/reserve_slot.lua` | integration test (d), `e2e:two-workers` |
+| **Emails per hour** (per sender, configurable) | `MAX_EMAILS_PER_HOUR_PER_SENDER` (default 200) plus the campaign's hourly limit; atomic Redis counters per hour window | `backend/src/ratelimit/` | integration tests (d), (e); `load-test` |
+| Limit reached: defer, don't drop | Job moved to the next hour window with an order-preserving offset; status stays `scheduled` | `backend/src/worker/processEmail.ts` | integration test (e), `load-test` |
+| **Slack notification** on limit hit | Real Slack OAuth (`incoming-webhook`), encrypted webhook per user, one message per sender per hour, works after a later connect | `backend/src/modules/slack` | integration test (f), `slack:demo` (live message) |
+| Behavior under load (1000+ emails) | Chunked bulk enqueue; planner (tier 1) and Redis guard (tier 2) | §7 | `load-test` (1,120 emails, cap never exceeded) |
+| Searchable via Elasticsearch | Async indexing queue, upsert by email ID, user-scoped search, `es:reindex` | `backend/src/modules/search` | UI search, `es:reindex` |
+| Live BullMQ dashboard | Bull Board at `/admin/queues`, HTTP Basic auth | `backend/src/api/bullBoard.ts` | manual |
+
+### Frontend
+
+| Requirement | Implementation | Where |
+|---|---|---|
+| Real Google OAuth login | Backend authorization-code flow, httpOnly session cookie, redirect to the dashboard | `frontend/src/features/auth` |
+| Header with name, email, avatar and logout | Sidebar profile card (initials fallback) with a menu: Slack, Queue dashboard, Logout | `frontend/src/layout` |
+| Dashboard with Scheduled and Sent tabs | Keyboard-accessible tabs with live counts; tab, page, search and filter stored in the URL | `frontend/src/features/emails` |
+| "Compose New Email" | Compose page: subject, body, start time (Send Later popover), delay, hourly limit, sender | `frontend/src/features/compose` |
+| CSV/TXT lead upload with address count | Parsed in the browser with PapaParse, every column scanned; shows detected, duplicate and invalid counts | `frontend/src/features/compose/extractEmails.ts` |
+| Scheduled table: email, subject, scheduled time, status | Generic typed `Table`; orange time chip, "Sending", deferred tooltip | `frontend/src/features/emails/EmailTable.tsx` |
+| Sent table: email, subject, sent time, status | Sent and Failed chips, failure reason tooltip, Ethereal preview link | same |
+| Loading, empty and error states | Skeleton rows, empty states with a call to action, error state with retry, toasts | `frontend/src/components/ui` |
+| Matches the Figma | Login, inbox lists, email view, compose with chips and Send Later; tokens in `src/index.css` | §13 |
+| Reusable components, DRY, typed | 15 UI components, one table for all lists, typed API client and response types | `frontend/src/components/ui`, `frontend/src/types` |
+| Extras | Elasticsearch search box with status filter, email detail page, Slack connect/disconnect/test | — |
+
+---
+
 ## 1. Architecture
 
 ```mermaid
