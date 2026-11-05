@@ -1,0 +1,20 @@
+first_name,last_name,email,company,title
+Oliver,Brown,oliver.brown@example.com,Northwind Traders,Head of Sales
+Sarah,Wilson,sarah.wilson@example.com,Contoso Ltd,Marketing Lead
+John,Smith,john.smith@example.org,Fabrikam Inc,CTO
+Olive,Garcia,olive.garcia@example.net,Tailspin Toys,Founder
+Priya,Sharma,priya.sharma@example.com,Adventure Works,VP Growth
+Rahul,Mehta,rahul.mehta@example.org,Wide World Importers,Sales Manager
+Emma,Johnson,emma.johnson@example.com,Litware Inc,Operations
+Liam,Davis,liam.davis@example.net,Proseware,Product Manager
+Aisha,Khan,aisha.khan@example.com,Lucerne Publishing,Editor
+Carlos,Ramirez,carlos.ramirez@example.org,Blue Yonder Airlines,Procurement
+Mei,Chen,mei.chen@example.com,Coho Winery,Owner
+Noah,Taylor,noah.taylor@example.net,Margie's Travel,Director
+Sofia,Rossi,sofia.rossi@example.com,Alpine Ski House,Marketing
+Arjun,Patel,arjun.patel@example.org,Trey Research,Analyst
+Hannah,Lee,hannah.lee@example.com,School of Fine Art,Admissions
+Duplicate,Upper Case,OLIVER.BROWN@EXAMPLE.COM,Northwind Traders,(duplicate - removed)
+Duplicate,Again,sarah.wilson@example.com,Contoso Ltd,(duplicate - removed)
+Bad,Address,oliver@localhost,Nowhere,(invalid - skipped)
+No,Email,,Empty Co,(no email - ignored)
