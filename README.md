@@ -266,11 +266,11 @@ The dashboard's profile menu has **Slack**: connect, reconnect, disconnect, send
 3. Under **OAuth & Permissions → Redirect URLs**, add `${PUBLIC_BACKEND_URL}/api/slack/callback`.
 4. Under **Bot Token Scopes**, add `incoming-webhook`. Copy the Client ID and Secret into `.env`, then restart the API.
 5. In the dashboard, open the profile menu → **Slack → Connect Slack**, pick a channel, and Allow.
-6. Run the live demo, with the worker running:
+6. Stop `npm run dev:worker`, then run the live demo (it starts its own worker with a per-sender cap of 3):
    ```bash
    npm run slack:demo -w backend -- you@gmail.com
    ```
-   It schedules 6 emails with an hourly limit of 2 on one sender. Two send, the third hits the limit, the message appears in your channel, and the rest are deferred to the next hour.
+   A single campaign never trips the limit at runtime, because the planner already spreads it across hours. The alert fires when work the planner couldn't foresee lands on the same sender. The demo creates exactly that: two campaigns of 3 emails each, sharing one sender. The sender's hourly budget runs out, the Redis guard returns `LIMIT`, the message appears in your channel, and the overflow is deferred to the next hour. It prints the Slack HTTP status from `notification_log`. Restart `dev:worker` afterwards; it sends the deferred emails when their hour comes.
 
 > The tunnel URL changes each time a quick tunnel restarts; update `PUBLIC_BACKEND_URL` and the Slack redirect URL together.
 
