@@ -8,6 +8,19 @@ A production-style email scheduler and dashboard. Express + BullMQ + Redis + Pos
 - **Rate limited across workers.** The per-sender hourly cap and minimum spacing are enforced by one atomic Redis Lua script. Overflow is deferred to the next hour, never dropped.
 - **Searchable** through Elasticsearch, with a **live queue dashboard** (Bull Board), **real Google login**, and **real Slack OAuth** that posts a message when a sender hits its limit.
 
+## Live demo
+
+**https://garvv-scheduler.duckdns.org**
+
+- **Sign in:** click **Sign up** on the login card and create an account with any email and a password (8+ characters), or use **Login with Google** (the Google app is published, so any Google account works).
+- **Try it:** Compose → upload [`samples/leads.csv`](samples/leads.csv) (15 valid addresses, plus duplicates and an invalid row to show the counters) → **Send Later** → watch the emails move from **Scheduled** to **Sent**. Each sent row links to its Ethereal preview.
+- **Slack:** profile menu → **Slack → Connect Slack** to receive the rate-limit alerts in your own workspace.
+- Hosted on one Google Cloud VM (e2-medium, Mumbai) with Docker Compose and Caddy (automatic Let's Encrypt HTTPS). The deployment is checked by `deploy/smoke-test.sh` (25/25 passing against the live URL). See [Deploying it live](#deploying-it-live-one-server-docker).
+
+## Contents
+
+[Features implemented](#features-implemented) · [1. Architecture](#1-architecture) · [2. Setup: backend, frontend, Ethereal, env](#2-setup-about-5-commands) · [Deploying it live](#deploying-it-live-one-server-docker) · [3. Scheduling](#3-how-scheduling-works-and-why-there-is-no-cron) · [4. Persistence on restart](#4-persistence-and-restart-behavior) · [5. Idempotency](#5-idempotency-why-an-email-is-never-sent-twice) · [6. Rate limiting and concurrency](#6-rate-limiting-and-concurrency) · [7. Load](#7-behavior-under-load-1000-emails-limit-exceeded) · [8. Elasticsearch](#8-elasticsearch) · [9. Slack](#9-slack-real-oauth-and-a-real-message-on-limit-hit) · [10. Google login](#10-google-login-real-oauth) · [11. Bull Board](#11-bull-board) · [12. API](#12-api-reference) · [13. Frontend](#13-frontend) · [14. Testing](#14-testing-and-verification) · [15. Security](#15-security-checklist) · [16. Next steps](#16-known-limitations-and-what-id-do-next) · [17. Alternatives](#17-alternatives-considered) · [18. Assumptions and trade-offs](#18-assumptions-and-shortcuts)
+
 ---
 
 ## Features implemented
@@ -59,7 +72,7 @@ flowchart LR
   subgraph Browser
     UI[React dashboard<br/>Vite + Tailwind + React Query]
   end
-  UI -- "/api (Vite proxy, httpOnly cookie)" --> API
+  UI -- "/api (Vite proxy in dev, Caddy HTTPS in prod; httpOnly cookie)" --> API
   subgraph API["API process (src/api/server.ts)"]
     R[REST + Google/Slack OAuth] --> P[planner<br/>pure function]
     BB[Bull Board /admin/queues]
@@ -89,7 +102,7 @@ flowchart LR
 | **Redis / BullMQ** | Execution engine: timers (delayed jobs), job locks, retries, rate-limit counters, OAuth state nonces. Everything in it can be rebuilt from Postgres. |
 | **Elasticsearch** | Read model for search, fed asynchronously. Never on the send path. |
 
-Two separate entrypoints: `dev:api` and `dev:worker`. You can run as many workers as you like.
+Two separate entrypoints: `dev:api` and `dev:worker`. You can run as many workers as you like. In production the API also serves the built React app, so the site, API and OAuth callbacks share one origin.
 
 ---
 
@@ -109,15 +122,24 @@ docker compose up -d    # postgres:16, redis:7 (AOF), elasticsearch:8
 ```bash
 npm run db:migrate && npm run db:seed
 ```
+**Run the backend** (Express API + BullMQ worker, two processes):
 ```bash
 npm run dev:api        # terminal 1  -> http://localhost:4000
-npm run dev:worker     # terminal 2
-npm run dev:web        # terminal 3  -> http://localhost:5173
+npm run dev:worker     # terminal 2  (start more of these to scale out)
 ```
+**Run the frontend:**
+```bash
+npm run dev:web        # terminal 3  -> http://localhost:5173 (proxies /api to :4000)
+```
+
+Open http://localhost:5173 and sign up with an email and password (Google login works once its credentials are in `.env`).
 
 > Host ports are **55432** (Postgres) and **56379** (Redis) so they don't clash with other local instances. Elasticsearch uses 9200.
 
-**Ethereal:** nothing to configure. On first boot, the API and worker create `SENDER_COUNT` Ethereal accounts through the same endpoint as `nodemailer.createTestAccount()` and store them in `senders`. Only missing accounts are created, and a Redis lock prevents a boot race. Every sent email has an **Ethereal preview link**, shown in the Sent list and on the email page.
+**Ethereal Email:** nothing to configure. On first boot, the API and worker create `SENDER_COUNT` Ethereal accounts through the same endpoint as `nodemailer.createTestAccount()` and store them in `senders`. Only missing accounts are created, and a Redis lock prevents a boot race. Every sent email has an **Ethereal preview link**, shown in the Sent list and on the email page. To browse a sender's whole mailbox, print the logins and sign in at https://ethereal.email/login:
+```bash
+npm run ethereal -w backend
+```
 
 ### Environment variables
 
@@ -125,7 +147,7 @@ npm run dev:web        # terminal 3  -> http://localhost:5173
 |---|---|---|
 | `PORT` | 4000 | API port |
 | `FRONTEND_URL` | http://localhost:5173 | CORS origin and post-login redirects |
-| `PUBLIC_BACKEND_URL` | — | **HTTPS** tunnel to the API; only needed for Slack OAuth |
+| `PUBLIC_BACKEND_URL` | — | public **HTTPS** URL of the API, used for the Slack callback (a tunnel locally; the site URL in production) |
 | `DATABASE_URL`, `REDIS_URL`, `ELASTICSEARCH_URL` | see `.env.example` | match `docker-compose.yml` |
 | `JWT_SECRET` | — | `openssl rand -hex 32` |
 | `ENCRYPTION_KEY` | — | 64 hex chars, `openssl rand -hex 32` (AES-256-GCM for Slack webhooks) |
@@ -144,30 +166,29 @@ npm run dev:web        # terminal 3  -> http://localhost:5173
 
 Configuration is validated with zod at startup, and the process exits with a clear list of problems. Missing Google or Slack credentials don't stop the app. Those flows return `NOT_CONFIGURED` with an explanation, and the login page shows a readable message.
 
----
-
 ### Deploying it live (one server, Docker)
 
-The production stack (`docker-compose.prod.yml`) runs everything in containers on one server: Postgres, Redis (AOF), Elasticsearch, the API (which also serves the built website), the worker, and **Caddy** for automatic HTTPS. Only ports 80/443 are reachable from outside; the databases have no published ports. It works on x86 and ARM, including Oracle Cloud Always Free (Ampere A1, 4 OCPU / 24 GB, free).
+The production stack (`docker-compose.prod.yml`) runs everything in containers on one server: Postgres, Redis (AOF), Elasticsearch, the API (which also serves the built website), the worker, and **Caddy** for automatic HTTPS. Only ports 80/443 are reachable from outside; the databases have no published ports. It works on any Ubuntu 22.04/24.04 server with about 4 GB of RAM, x86 or ARM. The live demo runs on a **Google Cloud e2-medium** (2 vCPU / 4 GB, about 2 GB used); Oracle Cloud's Ampere A1 works too.
 
-1. **Create the server** (Oracle Cloud → Compute → Instances → Create): image **Ubuntu 24.04**, shape **VM.Standard.A1.Flex** (2 OCPU / 12 GB is plenty). Download the SSH private key it offers and note the **public IP**.
-2. **Open 80/443 in Oracle's cloud firewall:** go to the instance → its subnet → **Security List → Add Ingress Rules**: source `0.0.0.0/0`, TCP, destination ports `80,443`.
-3. **Pick a hostname** that points at the IP, for example a free DuckDNS subdomain (`yourname.duckdns.org`) or your own domain's A record. Google sign-in needs a real hostname, not a bare IP.
-4. **Prepare the server** (installs Docker, opens the host firewall):
+1. **Create the server** with **Ubuntu 24.04** and a public IP, and add your SSH public key.
+   - *Google Cloud:* Compute Engine → Create instance → e2-medium, 30 GB disk, tick **Allow HTTP/HTTPS traffic**, reserve a static external IP, add the key under Security → Manage access (user `ubuntu`).
+   - *Oracle Cloud:* VM.Standard.A1.Flex in a **public** subnet; add an ingress rule for TCP `80,443` from `0.0.0.0/0` to the subnet's Security List.
+2. **Pick a hostname** that points at the IP, for example a free DuckDNS subdomain (`yourname.duckdns.org`) or your own domain's A record. Google sign-in needs a real hostname, not a bare IP.
+3. **Prepare the server.** It installs Docker, opens 80/443 in the host firewall (Oracle images reject them by default), keeps IP forwarding on and matches Docker's MTU to the NIC (Google Cloud images disable forwarding and use MTU 1460, which otherwise cuts containers off from the internet), sets `vm.max_map_count` for Elasticsearch, and checks outbound access to Ethereal SMTP (587), Slack and Google:
    ```bash
    ssh -i <key> ubuntu@<ip> 'bash -s' < deploy/server-setup.sh
    ```
-5. **Create `.env.production`** from `.env.production.example`. Set `SITE_ADDRESS` to the hostname, the three `https://` URLs, fresh secrets (`openssl rand -hex 32`), and the Google/Slack IDs.
-6. **Deploy** (also how you ship updates later):
+4. **Create `.env.production`** (git-ignored) from `.env.production.example`. Set `SITE_ADDRESS` to the hostname, the three `https://` URLs, fresh secrets (`openssl rand -hex 32`), and the Google/Slack IDs.
+5. **Deploy** (also how you ship updates later):
    ```bash
    deploy/deploy.sh ubuntu@<ip> <key>
    ```
    It uploads the committed code and `.env.production`, builds the image on the server, runs migrations, starts everything, and prints the live URL once `/health` is green.
-7. **Point the OAuth apps at the live URL:**
+6. **Point the OAuth apps at the live URL:**
    - Google client: add `https://<host>` as a JavaScript origin and `https://<host>/api/auth/google/callback` as a redirect URI, fill in **Branding**, then **Publish app** (§10).
    - Slack app: add `https://<host>/api/slack/callback` as a redirect URL.
 
-8. **Verify the live site** from your machine (25 checks; it creates one throwaway account and sends 3 emails to example.com):
+7. **Verify the live site** from your machine (25 checks; it creates one throwaway account and sends 3 emails to example.com):
    ```bash
    deploy/smoke-test.sh https://<host>
    ```
@@ -339,6 +360,7 @@ Postgres full-text search was rejected because the assignment requires ES. Synch
 The dashboard's profile menu has **Slack**: connect, reconnect, disconnect, send test. Endpoints: `GET /api/slack/status`, `DELETE /api/slack/disconnect`, `POST /api/slack/test`. The integration test `slackNotify.test.ts` checks the real HTTP POST against a local webhook: one message across 5 concurrent limit hits, silence without a connection, and cleanup of a revoked webhook.
 
 ### Setup (needs your credentials)
+On the live site there's no tunnel: `PUBLIC_BACKEND_URL` is the site URL and the Slack redirect URL is `https://<host>/api/slack/callback`. Locally:
 1. Start a tunnel to the API: `cloudflared tunnel --url http://localhost:4000` (or `ngrok http 4000`). Put the `https://…` URL in `PUBLIC_BACKEND_URL`.
 2. At https://api.slack.com/apps, choose **Create New App → From scratch**.
 3. Under **OAuth & Permissions → Redirect URLs**, add `${PUBLIC_BACKEND_URL}/api/slack/callback`.
@@ -364,24 +386,24 @@ The flow is a backend-driven authorization-code flow using `google-auth-library`
 
 Tokens never touch `localStorage`. In dev, Vite proxies `/api` so the cookie is same-origin. CORS is still restricted to `FRONTEND_URL` with credentials.
 
-**Setup:** in Google Cloud Console, go to APIs & Services → OAuth consent screen (External, add yourself as a test user), then Credentials → **Create OAuth client ID** (Web application). Add the authorized redirect URI `http://localhost:4000/api/auth/google/callback`. Put the ID and secret in `.env` and restart the API.
+**Setup (local):** in Google Cloud Console, go to APIs & Services → OAuth consent screen (External, add yourself as a test user), then Credentials → **Create OAuth client ID** (Web application). Add the authorized redirect URI `http://localhost:4000/api/auth/google/callback`. Put the ID and secret in `.env` and restart the API.
 
 Trade-off: a stateless JWT can't be revoked server-side before it expires (logout clears the cookie). A Redis session store would add revocation at the cost of a lookup per request.
 
 ### Email + password (so anyone with the link can sign in)
 
-Google only lets listed test users in while an OAuth app is in "Testing". So the hosted app also offers **Sign up / Login with email and password** on the same login card, and reviewers can create an account in seconds.
+Google only lets listed test users in while an OAuth app is in "Testing", and a reviewer may not want to use Google at all. So the hosted app also offers **Sign up / Login with email and password** on the same login card, and reviewers can create an account in seconds.
 - `POST /api/auth/register {name, email, password}` (password at least 8 characters) and `POST /api/auth/login {email, password}`. Both set the same httpOnly session cookie as Google login and are rate-limited.
 - Passwords are stored only as **salted scrypt hashes** (`backend/src/lib/password.ts`, Node's built-in crypto). Login compares in constant time, and a failed login looks the same whether the email exists or not.
 - A Google-only account can't be taken over by registering its email with a password. If someone who registered with a password later uses Google with the same verified email, the Google identity is linked to their existing account.
 
-To let **any Google account** sign in too, fill in Google Auth Platform → **Branding** (app name, support email, homepage `https://<your-domain>`, privacy policy `https://<your-domain>/privacy`, authorized domain), then **Audience → Publish app**. The app requests only `openid email profile`, which shouldn't need Google's verification review.
+To let **any Google account** sign in too, fill in Google Auth Platform → **Branding** (app name, support email, homepage `https://<your-domain>`, privacy policy `https://<your-domain>/privacy`, authorized domain), then **Audience → Publish app**. The app requests only `openid email profile`, which doesn't need Google's verification review. The live demo's Google app is published this way.
 
 ---
 
 ## 11. Bull Board
 
-The live queue dashboard is at **http://localhost:4000/admin/queues** (also reachable from the profile menu → *Queue dashboard*, through the Vite proxy). It shows the `emails`, `indexing` and `maintenance` queues: delayed jobs with their run times, active jobs, retries and failures. It's protected by HTTP Basic auth (`BULL_BOARD_USER`/`BULL_BOARD_PASSWORD`) and disabled if those are unset.
+The live queue dashboard is at **http://localhost:4000/admin/queues** locally and `https://<host>/admin/queues` when deployed (also reachable from the profile menu → *Queue dashboard*, through the Vite proxy). It shows the `emails`, `indexing` and `maintenance` queues: delayed jobs with their run times, active jobs, retries and failures. It's protected by HTTP Basic auth (`BULL_BOARD_USER`/`BULL_BOARD_PASSWORD`) and disabled if those are unset.
 
 ---
 
@@ -393,6 +415,7 @@ All JSON. Errors use `{ "error": { "code", "message", "details?" } }`. Every rou
 |---|---|---|
 | GET | `/health` (also `/api/health`) | Postgres / Redis / ES checks (503 if Postgres or Redis is down) |
 | GET | `/api/auth/google` · `/api/auth/google/callback` | Google OAuth |
+| POST | `/api/auth/register` · `/api/auth/login` | email + password; body `{name, email, password}` / `{email, password}`; sets the session cookie |
 | GET | `/api/auth/me` | `{id, name, email, avatarUrl}` |
 | POST | `/api/auth/logout` | clears the cookie |
 | POST | `/api/campaigns` | header `Idempotency-Key`; body `{subject, body, recipients[], startAt, delayMs, hourlyLimit, senderId?}`. **201** `{campaign, effective, clamped, scheduledCount, invalidCount, duplicatesRemoved, firstScheduledAt, lastScheduledAt}`, or **200** on replay |
@@ -440,7 +463,7 @@ Vite + React 18 + TypeScript (strict) + Tailwind 4, React Router, TanStack Query
 ## 14. Testing and verification
 
 ```bash
-npm test                                   # unit: backend 27 + frontend 5
+npm test                                   # unit: backend 30 + frontend 5
 npm run test:integration -w backend        # needs docker compose services
 npm run typecheck && npm run lint          # both packages, zero errors
 ```
@@ -451,6 +474,7 @@ npm run typecheck && npm run lint          # both packages, zero errors
 - SMTP error classification.
 - State-machine guards.
 - Recipient normalization.
+- Password hashing and verification.
 - CSV/TXT email extraction (frontend).
 
 **Integration tests** (real Postgres and Redis):
@@ -463,6 +487,7 @@ npm run typecheck && npm run lint          # both packages, zero errors
 | (d) | 200 concurrent `reserve_slot` calls with cap 50, over 8 connections | exactly 50 OK and 150 LIMIT; OK slots ≥ delay apart; campaign cap enforced separately |
 | (e) | cap 2 with 5 due jobs | 2 sent, 3 deferred into the next window, 0 failed |
 | (f) | Slack notify | one POST per sender per window under concurrency; silent without a connection; revoked webhook removed |
+| (g) | email + password auth | register, duplicate email (409), wrong password (401), login, Google-only email protected |
 
 **End-to-end scripts.** These spawn the real API and worker as child processes and SIGKILL them:
 
@@ -475,6 +500,13 @@ npm run typecheck && npm run lint          # both packages, zero errors
 | `npm run slack:demo -w backend -- you@gmail.com` | live Slack message (needs your workspace) |
 
 Stop your own `dev:worker` before `load-test`; it runs its own dry-run worker and checks for others. The e2e scripts start their own API on port 4000, so stop `dev:api` first.
+
+**Production stack:**
+
+| Command | What it proves |
+|---|---|
+| `deploy/smoke-test.sh https://<host>` | 25 checks against a running deployment: pages, security headers, sign-up/login, OAuth redirects, schedule → send through Ethereal → search, per-user isolation. **25/25 against the live site.** |
+| `ENV_FILE=.env.prodtest deploy/prod-e2e.sh` | local only: the same Docker stack under SIGKILL, Redis restart, full stop/start, two workers, Elasticsearch down and a forced hourly limit. **25/25.** |
 
 ---
 
@@ -491,7 +523,8 @@ Stop your own `dev:worker` before `load-test`; it runs its own dry-run worker an
 - Slack webhook URLs encrypted at rest (AES-256-GCM) and never logged. Pino redacts credentials, cookies and webhooks; query strings (OAuth codes) are never logged.
 - Bull Board behind Basic auth (timing-safe compare).
 - Ethereal passwords are never returned by the API.
-- `.env` is git-ignored.
+- Passwords stored as salted scrypt hashes, compared in constant time.
+- `.env` and `.env.production` are git-ignored; in production only Caddy (80/443) is exposed, with HTTPS and HSTS.
 
 ---
 
@@ -525,3 +558,6 @@ Stop your own `dev:worker` before `load-test`; it runs its own dry-run worker an
 - Senders form a global pool of Ethereal accounts shared by all users. Limits are per sender, so they apply across users.
 - Pinned versions: Prisma 6.19.3, BullMQ 5.81.5, ioredis 5.11.1, `@elastic/elasticsearch` 8.19.2 (server 8.19.2), Express 5.1, zod 4, Vitest 3.2.7, TypeScript 5.9.3, React 18.3.1, Vite 7.3.7, Tailwind 4.3.4. Newer majors existed (Prisma 7/8, BullMQ 6, ES client 9); I stayed on the line that matches ES 8 and is well proven.
 - Ethereal accounts are created by calling the same endpoint `nodemailer.createTestAccount()` uses, because nodemailer caches one account per process and we need several distinct senders.
+- Ethereal never delivers to real inboxes; every "sent" email is viewed through its Ethereal preview link. Swapping in a real SMTP provider only changes the transport config.
+- Email + password login was added beyond the brief so reviewers can use the hosted app without a Google account.
+- The live demo is a single server (all services on one VM), which is enough for a demo. A production setup would use managed Postgres/Redis/Elasticsearch and run several worker instances, which the design already supports.
