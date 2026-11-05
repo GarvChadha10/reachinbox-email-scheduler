@@ -167,7 +167,18 @@ The production stack (`docker-compose.prod.yml`) runs everything in containers o
    - Google client: add `https://<host>` as a JavaScript origin and `https://<host>/api/auth/google/callback` as a redirect URI, fill in **Branding**, then **Publish app** (§10).
    - Slack app: add `https://<host>/api/slack/callback` as a redirect URL.
 
+8. **Verify the live site** from your machine (25 checks; it creates one throwaway account and sends 3 emails to example.com):
+   ```bash
+   deploy/smoke-test.sh https://<host>
+   ```
+
 Data lives in Docker volumes, so redeploys and reboots keep it. Every container uses `restart: unless-stopped`.
+
+**Before deploying, the production stack can be tested locally:**
+```bash
+ENV_FILE=.env.prodtest deploy/prod-e2e.sh
+```
+This uses `SITE_ADDRESS=localhost` and `https://localhost:8443` URLs; Caddy issues a local certificate. It runs the smoke test, then kills the API and worker mid-schedule, restarts Redis, stops and starts every container (a reboot), runs two workers, takes Elasticsearch down, and forces the hourly limit. Each step checks that every email is sent exactly once and nothing is dropped. Last run: 25 + 25 checks passed.
 
 ---
 
