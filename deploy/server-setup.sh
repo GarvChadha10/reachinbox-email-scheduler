@@ -30,6 +30,14 @@ if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sudo sh >/dev/null
 fi
 sudo systemctl enable --now docker >/dev/null 2>&1 || true
+# Match Docker's MTU to the host NIC (Google Cloud uses 1460; Docker defaults to 1500, which
+# makes HTTPS from containers hang).
+nic_mtu=$(ip -o route get 1.1.1.1 | awk '{for(i=1;i<NF;i++) if($i=="dev") print $(i+1)}' | xargs -I{} cat /sys/class/net/{}/mtu)
+if [ -n "$nic_mtu" ] && [ "$nic_mtu" -lt 1500 ] && [ ! -f /etc/docker/daemon.json ]; then
+  echo "{\"mtu\": $nic_mtu, \"default-network-opts\": {\"bridge\": {\"com.docker.network.driver.mtu\": \"$nic_mtu\"}}}" | sudo tee /etc/docker/daemon.json >/dev/null
+  sudo systemctl restart docker
+  echo "   Docker MTU set to $nic_mtu (host NIC)"
+fi
 sudo usermod -aG docker "$USER" || true
 docker_ver=$(sudo docker --version)
 echo "   $docker_ver"
@@ -39,8 +47,12 @@ echo "   first FORWARD rule: $first_fwd (should be a DOCKER jump, not REJECT)"
 
 echo "== 3/4 Kernel setting for Elasticsearch"
 echo 'vm.max_map_count=262144' | sudo tee /etc/sysctl.d/99-elasticsearch.conf >/dev/null
-sudo sysctl -q --system
-echo "   vm.max_map_count=$(sysctl -n vm.max_map_count)"
+# Docker needs IP forwarding; some images (Google Cloud's Ubuntu) ship a sysctl file that turns it
+# off, so persist it with a later-sorting file. Load only our files: re-running `sysctl --system`
+# would re-apply the image's ip_forward=0 and cut every container off from the internet.
+echo 'net.ipv4.ip_forward=1' | sudo tee /etc/sysctl.d/99-docker-forward.conf >/dev/null
+sudo sysctl -q -p /etc/sysctl.d/99-elasticsearch.conf -p /etc/sysctl.d/99-docker-forward.conf
+echo "   vm.max_map_count=$(sysctl -n vm.max_map_count)  ip_forward=$(sysctl -n net.ipv4.ip_forward)"
 
 echo "== 4/4 Outbound access the app needs"
 probe() {
@@ -54,7 +66,7 @@ probe oauth2.googleapis.com 443 "Google sign-in" || ok=1
 
 mkdir -p ~/reachinbox
 if [ "$ok" -eq 0 ]; then
-  echo "Server ready. Next: allow TCP 80,443 in the Oracle VCN Security List (if not done), then run deploy/deploy.sh."
+  echo "Server ready. Next: allow TCP 80,443 in the cloud firewall (Oracle Security List / GCP "Allow HTTP/HTTPS"), then run deploy/deploy.sh."
 else
   echo "Server prepared, but some outbound checks FAILED (see above). If port 587 failed, Ethereal cannot send:"
   echo "upgrade the tenancy to Pay As You Go or open an Oracle support request to allow outbound 587."

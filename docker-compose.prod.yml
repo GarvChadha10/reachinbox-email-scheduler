@@ -4,7 +4,10 @@
 name: reachinbox-prod
 
 x-app: &app
-  build: .
+  build:
+    context: .
+    # Host networking for the build so package downloads work on clouds with MTU < 1500 (GCP: 1460).
+    network: host
   image: reachinbox-scheduler:latest
   env_file: ${ENV_FILE:-.env.production}
   environment:
@@ -89,6 +92,13 @@ services:
     restart: unless-stopped
     depends_on:
       api: { condition: service_healthy }
+
+# MTU 1460 works everywhere; Docker's default 1500 makes HTTPS hang on Google Cloud (MTU 1460),
+# which would break Ethereal SMTP, Slack and Google sign-in from inside the containers.
+networks:
+  default:
+    driver_opts:
+      com.docker.network.driver.mtu: "1460"
 
 volumes:
   pgdata:
