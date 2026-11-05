@@ -1,7 +1,10 @@
-import { Navigate, useSearchParams } from 'react-router-dom';
+import { useState, type FormEvent } from 'react';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { Input } from '../../components/ui/Input';
+import { Spinner } from '../../components/ui/Spinner';
+import { errorMessage } from '../../lib/api';
 import { FullPageSpinner } from './RequireAuth';
-import { useMe } from './useAuth';
+import { useMe, usePasswordAuth } from './useAuth';
 
 const ERRORS: Record<string, string> = {
   access_denied: 'Google sign-in was cancelled.',
@@ -27,14 +30,31 @@ export function LoginPage() {
   const me = useMe();
   const [params] = useSearchParams();
   const error = params.get('error');
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const auth = usePasswordAuth();
 
   if (me.isPending) return <FullPageSpinner />;
   if (me.data) return <Navigate to="/dashboard" replace />;
 
+  const signup = mode === 'signup';
+  const canSubmit = email.trim() !== '' && password !== '' && (!signup || (name.trim() !== '' && password.length >= 8));
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!canSubmit || auth.isPending) return;
+    auth.mutate(signup ? { mode, name: name.trim(), email: email.trim(), password } : { mode, email: email.trim(), password });
+  };
+  const switchMode = () => {
+    setMode(signup ? 'login' : 'signup');
+    auth.reset();
+  };
+
   return (
     <main className="flex min-h-full items-center justify-center bg-surface px-4 py-10">
       <div className="w-full max-w-[536px] rounded-lg border border-line bg-surface px-6 py-12 sm:px-[62px]">
-        <h1 className="text-center text-[38px] leading-tight font-semibold">Login</h1>
+        <h1 className="text-center text-[38px] leading-tight font-semibold">{signup ? 'Sign up' : 'Login'}</h1>
 
         {error && (
           <p role="alert" className="mt-5 rounded-md bg-danger-50 px-3 py-2 text-center text-[13px] text-danger-700">
@@ -56,17 +76,47 @@ export function LoginPage() {
           <span className="h-px flex-1 bg-line" />
         </div>
 
-        {/* Shown for design fidelity. Only Google OAuth is implemented (per the assignment). */}
-        <form className="space-y-3" onSubmit={(e) => e.preventDefault()} aria-describedby="email-login-note">
-          <Input variant="filled" className="w-full text-sm placeholder:text-ink-muted" placeholder="Email ID" aria-label="Email ID" type="email" disabled />
-          <Input variant="filled" className="w-full text-sm placeholder:text-ink-muted" placeholder="Password" aria-label="Password" type="password" disabled />
-          <button type="submit" disabled className="mt-5 h-[52px] w-full rounded-md bg-brand-500 text-base text-white opacity-60">
-            Login
+        <form className="space-y-3" onSubmit={submit} noValidate>
+          {signup && (
+            <Input variant="filled" className="w-full text-sm placeholder:text-ink-muted" placeholder="Full name" aria-label="Full name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} />
+          )}
+          <Input variant="filled" className="w-full text-sm placeholder:text-ink-muted" placeholder="Email ID" aria-label="Email ID" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={254} />
+          <Input
+            variant="filled"
+            className="w-full text-sm placeholder:text-ink-muted"
+            placeholder={signup ? 'Password (min. 8 characters)' : 'Password'}
+            aria-label="Password"
+            type="password"
+            autoComplete={signup ? 'new-password' : 'current-password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            maxLength={128}
+          />
+          {auth.isError && (
+            <p role="alert" className="text-center text-[13px] text-danger-700">
+              {errorMessage(auth.error)}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={!canSubmit || auth.isPending}
+            className="mt-5 flex h-[52px] w-full items-center justify-center gap-2 rounded-md bg-brand-500 text-base text-white transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {auth.isPending && <Spinner className="size-4" />}
+            {signup ? 'Create account' : 'Login'}
           </button>
-          <p id="email-login-note" className="pt-1 text-center text-xs text-ink-subtle">
-            Email sign-in isn't enabled. Please use Google.
+          <p className="pt-2 text-center text-[13px] text-ink-muted">
+            {signup ? 'Already have an account?' : "Don't have an account?"}{' '}
+            <button type="button" onClick={switchMode} className="font-medium text-brand-600 hover:underline">
+              {signup ? 'Log in' : 'Sign up'}
+            </button>
           </p>
         </form>
+        <p className="mt-8 text-center text-xs text-ink-subtle">
+          <Link to="/privacy" className="hover:text-ink hover:underline">
+            Privacy Policy
+          </Link>
+        </p>
       </div>
     </main>
   );

@@ -1,0 +1,6 @@
+# SITE_ADDRESS is your public hostname (e.g. 140-238-1-2.sslip.io or app.example.com).
+# Caddy obtains and renews the HTTPS certificate automatically.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+	reverse_proxy api:4000
+}

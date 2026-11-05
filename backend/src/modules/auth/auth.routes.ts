@@ -6,7 +6,8 @@ import { prisma } from '../../db/prisma.js';
 import { logger } from '../../lib/logger.js';
 import { requireAuth, userId } from '../../middleware/requireAuth.js';
 import { unauthorized } from '../../lib/errors.js';
-import { completeGoogleLogin, googleAuthUrl } from './auth.service.js';
+import { z } from 'zod';
+import { completeGoogleLogin, googleAuthUrl, loginWithPassword, registerWithPassword } from './auth.service.js';
 import { SESSION_COOKIE, sessionCookieOptions, signSession } from './session.js';
 
 const STATE_COOKIE = 'oauth_state';
@@ -50,10 +51,32 @@ authRouter.get('/google/callback', authLimiter, async (req, res) => {
   }
 });
 
+const passwordSchema = z.string().min(8, 'Password must be at least 8 characters').max(128);
+const registerSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(100),
+  email: z.email('Enter a valid email address').max(254),
+  password: passwordSchema,
+});
+const loginSchema = z.object({ email: z.string().trim().min(1).max(254), password: z.string().min(1).max(128) });
+
+const publicUser = (u: { id: string; name: string; email: string; avatarUrl: string | null }) => ({ id: u.id, name: u.name, email: u.email, avatarUrl: u.avatarUrl });
+
+authRouter.post('/register', authLimiter, async (req, res) => {
+  const user = await registerWithPassword(registerSchema.parse(req.body));
+  res.cookie(SESSION_COOKIE, signSession(user), sessionCookieOptions);
+  res.status(201).json(publicUser(user));
+});
+
+authRouter.post('/login', authLimiter, async (req, res) => {
+  const user = await loginWithPassword(loginSchema.parse(req.body));
+  res.cookie(SESSION_COOKIE, signSession(user), sessionCookieOptions);
+  res.json(publicUser(user));
+});
+
 authRouter.get('/me', requireAuth, async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: userId(req) } });
   if (!user) throw unauthorized('User no longer exists');
-  res.json({ id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl });
+  res.json(publicUser(user));
 });
 
 authRouter.post('/logout', (_req, res) => {

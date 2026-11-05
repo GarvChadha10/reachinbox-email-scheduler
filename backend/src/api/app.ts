@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import express, { Router } from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
@@ -36,7 +37,16 @@ export function createApp() {
   );
   // Bull Board's UI needs inline scripts/styles; give it its own relaxed CSP before helmet.
   mountBullBoard(app);
-  app.use(helmet());
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          // Google profile photos (lh3.googleusercontent.com) and Ethereal links need https images.
+          'img-src': ["'self'", 'data:', 'https:'],
+        },
+      },
+    }),
+  );
   app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
   app.use(express.json({ limit: '2mb' }));
   app.use(cookieParser());
@@ -51,6 +61,18 @@ export function createApp() {
   api.use('/senders', requireAuth, sendersRouter);
   api.use('/health', healthRouter);
   app.use('/api', api);
+
+  // Production: serve the built React app from the same origin (cookies stay first-party).
+  if (env.FRONTEND_DIST) {
+    const dist = env.FRONTEND_DIST;
+    app.use(express.static(dist, { index: false, maxAge: '1h' }));
+    // SPA fallback: any other GET that wants HTML gets index.html; client-side routing takes over.
+    app.use((req, res, next) => {
+      if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/admin') || !req.accepts('html')) return next();
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(join(dist, 'index.html'));
+    });
+  }
 
   app.use(notFoundHandler);
   app.use(errorHandler);

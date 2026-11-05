@@ -4,11 +4,13 @@ import { RequireAuth } from './features/auth/RequireAuth';
 import { ComposePage } from './features/compose/ComposePage';
 import { DashboardPage } from './features/emails/DashboardPage';
 import { EmailDetailPage } from './features/emails/EmailDetailPage';
+import { PrivacyPage } from './features/legal/PrivacyPage';
 
 export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
       <Route element={<RequireAuth />}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/compose" element={<ComposePage />} />

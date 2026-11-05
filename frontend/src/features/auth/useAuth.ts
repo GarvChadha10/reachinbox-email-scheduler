@@ -31,3 +31,18 @@ export function useLogout() {
     },
   });
 }
+
+type PasswordAuthInput = { mode: 'login'; email: string; password: string } | { mode: 'signup'; name: string; email: string; password: string };
+
+/** Email + password login / sign-up. On success the session cookie is set and the dashboard opens. */
+export function usePasswordAuth() {
+  const navigate = useNavigate();
+  return useMutation({
+    mutationFn: ({ mode, ...body }: PasswordAuthInput) =>
+      apiFetch<User>(mode === 'signup' ? '/auth/register' : '/auth/login', { method: 'POST', body, silent401: true }),
+    onSuccess: (user) => {
+      queryClient.setQueryData(qk.me, user);
+      navigate('/dashboard', { replace: true });
+    },
+  });
+}

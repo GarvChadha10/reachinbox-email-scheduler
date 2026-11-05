@@ -38,6 +38,7 @@ Each row maps an assignment requirement to where it lives and how it was verifie
 | Requirement | Implementation | Where |
 |---|---|---|
 | Real Google OAuth login | Backend authorization-code flow, httpOnly session cookie, redirect to the dashboard | `frontend/src/features/auth` |
+| Login for anyone with the link | Email + password sign-up and login on the Figma login card (scrypt-hashed passwords) | `frontend/src/features/auth`, `backend/src/modules/auth` |
 | Header with name, email, avatar and logout | Sidebar profile card (initials fallback) with a menu: Slack, Queue dashboard, Logout | `frontend/src/layout` |
 | Dashboard with Scheduled and Sent tabs | Keyboard-accessible tabs with live counts; tab, page, search and filter stored in the URL | `frontend/src/features/emails` |
 | "Compose New Email" | Compose page: subject, body, start time (Send Later popover), delay, hourly limit, sender | `frontend/src/features/compose` |
@@ -142,6 +143,31 @@ npm run dev:web        # terminal 3  -> http://localhost:5173
 | `MAIL_DRY_RUN` | false | load testing only: build messages without opening SMTP connections |
 
 Configuration is validated with zod at startup, and the process exits with a clear list of problems. Missing Google or Slack credentials don't stop the app. Those flows return `NOT_CONFIGURED` with an explanation, and the login page shows a readable message.
+
+---
+
+### Deploying it live (one server, Docker)
+
+The production stack (`docker-compose.prod.yml`) runs everything in containers on one server: Postgres, Redis (AOF), Elasticsearch, the API (which also serves the built website), the worker, and **Caddy** for automatic HTTPS. Only ports 80/443 are reachable from outside; the databases have no published ports. It works on x86 and ARM, including Oracle Cloud Always Free (Ampere A1, 4 OCPU / 24 GB, free).
+
+1. **Create the server** (Oracle Cloud → Compute → Instances → Create): image **Ubuntu 24.04**, shape **VM.Standard.A1.Flex** (2 OCPU / 12 GB is plenty). Download the SSH private key it offers and note the **public IP**.
+2. **Open 80/443 in Oracle's cloud firewall:** go to the instance → its subnet → **Security List → Add Ingress Rules**: source `0.0.0.0/0`, TCP, destination ports `80,443`.
+3. **Pick a hostname** that points at the IP, for example a free DuckDNS subdomain (`yourname.duckdns.org`) or your own domain's A record. Google sign-in needs a real hostname, not a bare IP.
+4. **Prepare the server** (installs Docker, opens the host firewall):
+   ```bash
+   ssh -i <key> ubuntu@<ip> 'bash -s' < deploy/server-setup.sh
+   ```
+5. **Create `.env.production`** from `.env.production.example`. Set `SITE_ADDRESS` to the hostname, the three `https://` URLs, fresh secrets (`openssl rand -hex 32`), and the Google/Slack IDs.
+6. **Deploy** (also how you ship updates later):
+   ```bash
+   deploy/deploy.sh ubuntu@<ip> <key>
+   ```
+   It uploads the committed code and `.env.production`, builds the image on the server, runs migrations, starts everything, and prints the live URL once `/health` is green.
+7. **Point the OAuth apps at the live URL:**
+   - Google client: add `https://<host>` as a JavaScript origin and `https://<host>/api/auth/google/callback` as a redirect URI, fill in **Branding**, then **Publish app** (§10).
+   - Slack app: add `https://<host>/api/slack/callback` as a redirect URL.
+
+Data lives in Docker volumes, so redeploys and reboots keep it. Every container uses `restart: unless-stopped`.
 
 ---
 
@@ -331,6 +357,15 @@ Tokens never touch `localStorage`. In dev, Vite proxies `/api` so the cookie is 
 
 Trade-off: a stateless JWT can't be revoked server-side before it expires (logout clears the cookie). A Redis session store would add revocation at the cost of a lookup per request.
 
+### Email + password (so anyone with the link can sign in)
+
+Google only lets listed test users in while an OAuth app is in "Testing". So the hosted app also offers **Sign up / Login with email and password** on the same login card, and reviewers can create an account in seconds.
+- `POST /api/auth/register {name, email, password}` (password at least 8 characters) and `POST /api/auth/login {email, password}`. Both set the same httpOnly session cookie as Google login and are rate-limited.
+- Passwords are stored only as **salted scrypt hashes** (`backend/src/lib/password.ts`, Node's built-in crypto). Login compares in constant time, and a failed login looks the same whether the email exists or not.
+- A Google-only account can't be taken over by registering its email with a password. If someone who registered with a password later uses Google with the same verified email, the Google identity is linked to their existing account.
+
+To let **any Google account** sign in too, fill in Google Auth Platform → **Branding** (app name, support email, homepage `https://<your-domain>`, privacy policy `https://<your-domain>/privacy`, authorized domain), then **Audience → Publish app**. The app requests only `openid email profile`, which shouldn't need Google's verification review.
+
 ---
 
 ## 11. Bull Board
@@ -387,7 +422,7 @@ Vite + React 18 + TypeScript (strict) + Tailwind 4, React Router, TanStack Query
   - Failed rows show the reason in a tooltip; sent emails link to the Ethereal preview.
 - **Reusable UI** in `src/components/ui`: Button, Input, Textarea, Modal (focus trap, Esc, focus restore), Tabs (ARIA, arrow keys), Table (generic, typed columns), Badge, Spinner, Skeleton, EmptyState, ErrorState, Avatar (initials fallback), FileDropzone, Pagination, StarButton.
 - Feature code lives in `src/features/{auth,emails,compose,slack}`, with a typed fetch wrapper (`src/lib/api.ts`: `credentials: 'include'`, central errors, global 401 → `/login`) and all API types in `src/types/api.ts`.
-- Interpretations: the email/password fields on the login card are disabled (only Google is required). The editor's formatting buttons are drawn but disabled (emails are plain text plus an auto-generated HTML part); undo/redo work. The paperclip (attachments) is disabled. "From" defaults to round-robin across the pool, or one sender can be chosen.
+- Interpretations: the login card's email/password form is a working **Login / Sign up** (see §10), so anyone with the link can use the hosted app. The editor's formatting buttons are drawn but disabled (emails are plain text plus an auto-generated HTML part); undo/redo work. The paperclip (attachments) is disabled. "From" defaults to round-robin across the pool, or one sender can be chosen.
 
 ---
 

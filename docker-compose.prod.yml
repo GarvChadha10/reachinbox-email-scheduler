@@ -1,0 +1,98 @@
+# Production stack: everything in containers. Only Caddy (80/443) is reachable from outside;
+# Postgres, Redis and Elasticsearch are on the private Docker network with no published ports.
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+name: reachinbox-prod
+
+x-app: &app
+  build: .
+  image: reachinbox-scheduler:latest
+  env_file: ${ENV_FILE:-.env.production}
+  environment:
+    NODE_ENV: production
+    DATABASE_URL: postgresql://scheduler:${POSTGRES_PASSWORD}@postgres:5432/scheduler?schema=public
+    REDIS_URL: redis://redis:6379
+    ELASTICSEARCH_URL: http://elasticsearch:9200
+    FRONTEND_DIST: /app/frontend/dist
+  restart: unless-stopped
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+    elasticsearch: { condition: service_healthy }
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: scheduler
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: scheduler
+    volumes: [pgdata:/var/lib/postgresql/data]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scheduler -d scheduler"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
+    volumes: [redisdata:/data]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.2
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    volumes: [esdata:/usr/share/elasticsearch/data]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+
+  api:
+    <<: *app
+    # Apply database migrations, then start the API (which also serves the website).
+    command: ["sh", "-c", "npx prisma migrate deploy && exec node --import tsx src/api/server.ts"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  worker:
+    <<: *app
+    command: ["node", "--import", "tsx", "src/worker/worker.ts"]
+    depends_on:
+      api: { condition: service_healthy }
+
+  caddy:
+    image: caddy:2
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  redisdata:
+  esdata:
+  caddydata:
+  caddyconfig:
