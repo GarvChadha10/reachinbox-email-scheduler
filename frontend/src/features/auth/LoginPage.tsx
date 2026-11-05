@@ -8,6 +8,7 @@ const ERRORS: Record<string, string> = {
   state_mismatch: 'Your sign-in session expired. Please try again.',
   login_failed: 'We could not complete Google sign-in. Please try again.',
   invalid_request: 'Invalid sign-in response. Please try again.',
+  not_configured: 'Google sign-in is not configured on the server yet (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in .env).',
 };
 
 function GoogleIcon() {

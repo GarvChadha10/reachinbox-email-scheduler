@@ -88,7 +88,17 @@ export async function enqueueEmails(rows: ReadonlyArray<{ id: string; scheduledA
   }
 }
 
-export async function createCampaign(userId: string, idempotencyKey: string, input: CreateCampaignInput): Promise<CreateCampaignResult> {
+export interface CreateCampaignOptions {
+  /** Override the sender pool (used by the load test to isolate its senders). Not exposed over HTTP. */
+  senderPool?: { id: string }[];
+}
+
+export async function createCampaign(
+  userId: string,
+  idempotencyKey: string,
+  input: CreateCampaignInput,
+  opts: CreateCampaignOptions = {},
+): Promise<CreateCampaignResult> {
   const norm = normalizeRecipients(input.recipients);
 
   const existing = await prisma.campaign.findUnique({ where: { userId_idempotencyKey: { userId, idempotencyKey } } });
@@ -99,7 +109,7 @@ export async function createCampaign(userId: string, idempotencyKey: string, inp
     throw badRequest(`Too many recipients: ${norm.valid.length} > ${env.MAX_RECIPIENTS_PER_CAMPAIGN}`);
   }
 
-  const pool = await listActiveSenders();
+  const pool = opts.senderPool ?? (await listActiveSenders());
   const senders = input.senderId ? pool.filter((s) => s.id === input.senderId) : pool;
   if (input.senderId && senders.length === 0) throw badRequest('Unknown or inactive sender');
   if (senders.length === 0) throw badRequest('No active senders available');

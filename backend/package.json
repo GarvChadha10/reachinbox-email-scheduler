@@ -18,7 +18,9 @@
     "dev:session": "tsx --env-file-if-exists=../.env scripts/dev-session.ts",
     "e2e:restart": "tsx --env-file-if-exists=../.env scripts/e2e-restart.ts",
     "e2e:redis": "tsx --env-file-if-exists=../.env scripts/e2e-redis.ts",
-    "e2e:two-workers": "tsx --env-file-if-exists=../.env scripts/e2e-two-workers.ts"
+    "e2e:two-workers": "tsx --env-file-if-exists=../.env scripts/e2e-two-workers.ts",
+    "load-test": "tsx --env-file-if-exists=../.env scripts/load-test.ts",
+    "slack:demo": "tsx --env-file-if-exists=../.env scripts/slack-demo.ts"
   },
   "dependencies": {
     "@bull-board/api": "6.21.3",

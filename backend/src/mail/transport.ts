@@ -1,4 +1,5 @@
 import nodemailer, { type Transporter } from 'nodemailer';
+import { env } from '../config/env.js';
 import type SMTPPool from 'nodemailer/lib/smtp-pool/index.js';
 
 export interface SmtpSender {
@@ -15,6 +16,11 @@ const transports = new Map<string, PooledTransport>();
 /** One pooled SMTP transport per sender, created lazily and cached for the process lifetime. */
 export function getTransport(sender: SmtpSender): PooledTransport {
   let t = transports.get(sender.id);
+  if (!t && env.MAIL_DRY_RUN) {
+    // Same code path, no network: used by scripts/load-test.ts.
+    t = nodemailer.createTransport({ jsonTransport: true }) as unknown as PooledTransport;
+    transports.set(sender.id, t);
+  }
   if (!t) {
     const created: PooledTransport = nodemailer.createTransport({
       pool: true,

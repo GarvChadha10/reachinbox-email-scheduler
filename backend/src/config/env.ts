@@ -29,6 +29,8 @@ const schema = z.object({
   MAX_RECIPIENTS_PER_CAMPAIGN: z.coerce.number().int().min(1).default(10000),
   SENDER_COUNT: z.coerce.number().int().min(1).default(3),
   SENDER_DOMAIN: z.string().min(1).default('scheduler.local'),
+  /** Load testing only: build messages but never open an SMTP connection (nodemailer jsonTransport). */
+  MAIL_DRY_RUN: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 

@@ -16,7 +16,14 @@ export const authRouter = Router();
 
 authRouter.get('/google', authLimiter, (_req, res) => {
   const state = randomBytes(24).toString('hex');
-  const url = googleAuthUrl(state); // throws NOT_CONFIGURED clearly if env vars are missing
+  let url: string;
+  try {
+    url = googleAuthUrl(state);
+  } catch (err) {
+    // Browser navigation: show a readable message on the login page instead of raw JSON.
+    logger.error({ err: (err as Error).message }, 'google oauth not configured');
+    return res.redirect(`${env.FRONTEND_URL}/login?error=not_configured`);
+  }
   res.cookie(STATE_COOKIE, state, { httpOnly: true, sameSite: 'lax', secure: isProd, maxAge: 10 * 60_000, path: '/api/auth' });
   res.redirect(url);
 });
