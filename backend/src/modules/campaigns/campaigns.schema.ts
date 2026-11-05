@@ -7,6 +7,8 @@ export const createCampaignSchema = z.object({
   startAt: z.iso.datetime({ offset: true }),
   delayMs: z.number().int().min(0).max(86_400_000),
   hourlyLimit: z.number().int().min(1).max(1_000_000),
+  /** Optional: send everything from one sender. Omitted = round-robin across the whole pool. */
+  senderId: z.uuid().optional(),
 });
 export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;
 

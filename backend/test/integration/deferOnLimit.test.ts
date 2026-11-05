@@ -19,7 +19,7 @@ afterAll(async () => {
 });
 
 function fakeJob(emailId: string) {
-  const moveToDelayed = vi.fn(async () => undefined);
+  const moveToDelayed = vi.fn(async (_ts: number, _token?: string) => undefined);
   const job = { id: `email-${emailId}`, data: { emailId }, attemptsMade: 0, opts: { attempts: 3 }, moveToDelayed } as unknown as Job<{ emailId: string }>;
   return { job, moveToDelayed };
 }
@@ -55,7 +55,7 @@ describe('(e) hitting the hourly limit defers instead of failing', () => {
         expect(d.scheduledAt.getTime()).toBeLessThan(nextWindow + 1000);
       }
       // Each deferred job was moved to the delayed set at its new time (order kept via planned_index offset).
-      const moved = outcomes.filter((o) => o.r === 'deferred').map((o) => o.moveToDelayed.mock.calls[0]?.[0] as unknown as number);
+      const moved = outcomes.filter((o) => o.r === 'deferred').map((o) => o.moveToDelayed.mock.calls[0]?.[0] ?? 0);
       expect(moved.every((t) => t >= nextWindow)).toBe(true);
     } finally {
       await fx.cleanup();

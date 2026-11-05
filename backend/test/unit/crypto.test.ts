@@ -14,7 +14,7 @@ describe('AES-256-GCM helpers', () => {
   });
   it('detects tampering', () => {
     const buf = Buffer.from(encrypt('secret', key), 'base64');
-    buf[buf.length - 1] ^= 0xff;
+    buf.writeUInt8(buf.readUInt8(buf.length - 1) ^ 0xff, buf.length - 1);
     expect(() => decrypt(buf.toString('base64'), key)).toThrow();
   });
   it('fails with the wrong key', () => {

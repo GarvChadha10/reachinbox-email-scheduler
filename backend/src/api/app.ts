@@ -12,6 +12,7 @@ import { authRouter } from '../modules/auth/auth.routes.js';
 import { campaignsRouter } from '../modules/campaigns/campaigns.routes.js';
 import { emailsRouter } from '../modules/emails/emails.routes.js';
 import { slackRouter } from '../modules/slack/slack.routes.js';
+import { sendersRouter } from '../modules/senders/senders.routes.js';
 import { healthRouter } from './health.js';
 import { mountBullBoard } from './bullBoard.js';
 
@@ -47,6 +48,7 @@ export function createApp() {
   api.use('/slack', slackRouter); // per-route auth (the callback arrives without a session cookie)
   api.use('/campaigns', requireAuth, campaignsRouter);
   api.use('/emails', requireAuth, emailsRouter);
+  api.use('/senders', requireAuth, sendersRouter);
   api.use('/health', healthRouter);
   app.use('/api', api);
 

@@ -1,6 +1,7 @@
 import type { estypes } from '@elastic/elasticsearch';
 import { es, ES_INDEX } from './es.js';
 import { toPage, type Pagination } from '../../lib/pagination.js';
+import { preview } from '../emails/emails.service.js';
 
 export const STATUS_GROUPS = {
   scheduled: ['scheduled', 'sending'],
@@ -15,6 +16,7 @@ export interface SearchParams extends Pagination {
 interface Doc {
   recipient_email: string;
   subject: string;
+  body: string;
   status: string;
   sender_email: string;
   scheduled_at: string;
@@ -55,6 +57,7 @@ export async function searchEmails(userId: string, params: SearchParams) {
       id: h._id!,
       recipient: d.recipient_email,
       subject: d.subject,
+      bodyPreview: preview(d.body),
       status: d.status,
       senderEmail: d.sender_email,
       scheduledAt: d.scheduled_at,

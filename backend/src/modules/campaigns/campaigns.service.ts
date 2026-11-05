@@ -99,7 +99,9 @@ export async function createCampaign(userId: string, idempotencyKey: string, inp
     throw badRequest(`Too many recipients: ${norm.valid.length} > ${env.MAX_RECIPIENTS_PER_CAMPAIGN}`);
   }
 
-  const senders = await listActiveSenders();
+  const pool = await listActiveSenders();
+  const senders = input.senderId ? pool.filter((s) => s.id === input.senderId) : pool;
+  if (input.senderId && senders.length === 0) throw badRequest('Unknown or inactive sender');
   if (senders.length === 0) throw badRequest('No active senders available');
 
   const eff = effectiveSettings(input.delayMs, input.hourlyLimit);

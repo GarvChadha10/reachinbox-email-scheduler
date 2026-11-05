@@ -18,5 +18,6 @@ export const logger = pino({
     ],
     censor: '[redacted]',
   },
-  transport: isProd ? undefined : { target: 'pino-pretty', options: { translateTime: 'SYS:HH:MM:ss.l', ignore: 'pid,hostname' } },
+  // Pretty output only for humans at a terminal; JSON otherwise (files, pipes, production).
+  transport: isProd || !process.stdout.isTTY ? undefined : { target: 'pino-pretty', options: { translateTime: 'SYS:HH:MM:ss.l', ignore: 'pid,hostname' } },
 });

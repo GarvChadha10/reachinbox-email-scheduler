@@ -15,7 +15,10 @@
     "test:integration": "vitest run test/integration --no-file-parallelism",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "dev:session": "tsx --env-file-if-exists=../.env scripts/dev-session.ts"
+    "dev:session": "tsx --env-file-if-exists=../.env scripts/dev-session.ts",
+    "e2e:restart": "tsx --env-file-if-exists=../.env scripts/e2e-restart.ts",
+    "e2e:redis": "tsx --env-file-if-exists=../.env scripts/e2e-redis.ts",
+    "e2e:two-workers": "tsx --env-file-if-exists=../.env scripts/e2e-two-workers.ts"
   },
   "dependencies": {
     "@bull-board/api": "6.21.3",

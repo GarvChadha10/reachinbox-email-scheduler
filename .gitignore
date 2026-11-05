@@ -7,3 +7,4 @@ dist/
 .DS_Store
 coverage/
 frontend/test-screenshots/
+.e2e-logs/
