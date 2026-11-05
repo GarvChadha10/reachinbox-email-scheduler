@@ -1,4 +1,5 @@
 import { Navigate, useSearchParams } from 'react-router-dom';
+import { Input } from '../../components/ui/Input';
 import { FullPageSpinner } from './RequireAuth';
 import { useMe } from './useAuth';
 
@@ -20,7 +21,6 @@ function GoogleIcon() {
   );
 }
 
-const fieldClass = 'h-[52px] w-full rounded-md bg-field px-4 text-sm text-ink placeholder:text-ink-muted disabled:cursor-not-allowed';
 
 export function LoginPage() {
   const me = useMe();
@@ -57,8 +57,8 @@ export function LoginPage() {
 
         {/* Shown for design fidelity. Only Google OAuth is implemented (per the assignment). */}
         <form className="space-y-3" onSubmit={(e) => e.preventDefault()} aria-describedby="email-login-note">
-          <input className={fieldClass} placeholder="Email ID" aria-label="Email ID" type="email" disabled />
-          <input className={fieldClass} placeholder="Password" aria-label="Password" type="password" disabled />
+          <Input variant="filled" className="w-full text-sm placeholder:text-ink-muted" placeholder="Email ID" aria-label="Email ID" type="email" disabled />
+          <Input variant="filled" className="w-full text-sm placeholder:text-ink-muted" placeholder="Password" aria-label="Password" type="password" disabled />
           <button type="submit" disabled className="mt-5 h-[52px] w-full rounded-md bg-brand-500 text-base text-white opacity-60">
             Login
           </button>

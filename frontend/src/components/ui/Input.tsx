@@ -1,31 +1,30 @@
 import clsx from 'clsx';
-import { forwardRef, type InputHTMLAttributes, type ReactNode } from 'react';
-import { controlClass, Field } from './Field';
+import { forwardRef, type InputHTMLAttributes } from 'react';
+
+export type InputVariant = 'underline' | 'box' | 'filled';
+
+const variants: Record<InputVariant, string> = {
+  // Compose "Subject" / "To" rows
+  underline: 'h-[46px] border-b border-line px-2.5 focus:border-brand-500',
+  // Compose "Delay" / "Hourly Limit" boxes
+  box: 'h-[42px] rounded-md border border-line px-3 focus:border-brand-500 focus:ring-2 focus:ring-brand-100 aria-[invalid=true]:border-danger-600',
+  // Login fields, search pill
+  filled: 'h-[52px] rounded-md bg-field px-4 focus:ring-2 focus:ring-brand-100',
+};
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
-  id: string;
-  label: string;
-  hint?: ReactNode;
-  error?: string;
-  hideLabel?: boolean;
+  variant?: InputVariant;
+  invalid?: boolean;
 }
 
-export const Input = forwardRef<HTMLInputElement, InputProps>(function Input({ id, label, hint, error, className, hideLabel, ...rest }, ref) {
-  const input = (
+/** Bare input styled from the Figma tokens; pair it with a <label htmlFor>. */
+export const Input = forwardRef<HTMLInputElement, InputProps>(function Input({ variant = 'box', invalid, className, ...rest }, ref) {
+  return (
     <input
       ref={ref}
-      id={id}
-      aria-invalid={error ? true : undefined}
-      aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
-      aria-label={hideLabel ? label : undefined}
-      className={clsx(controlClass, 'h-9', className)}
+      aria-invalid={invalid || undefined}
+      className={clsx('bg-transparent text-[16px] text-ink placeholder:text-ink-subtle focus:outline-none disabled:cursor-not-allowed', variants[variant], variant === 'filled' && 'bg-field', className)}
       {...rest}
     />
-  );
-  if (hideLabel) return input;
-  return (
-    <Field id={id} label={label} hint={hint} error={error}>
-      {input}
-    </Field>
   );
 });

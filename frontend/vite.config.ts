@@ -12,7 +12,8 @@ export default defineConfig({
     // Same-origin /api in dev: the httpOnly session cookie just works and CORS stays simple.
     proxy: {
       '/api': { target: backend, changeOrigin: false },
+      // Bull Board (HTTP Basic auth) is served by the API process.
+      '/admin': { target: backend, changeOrigin: false },
     },
   },
-  test: { environment: 'node' },
 });

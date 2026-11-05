@@ -55,13 +55,13 @@ export function Tabs<K extends string>({ items, value, onChange, orientation = '
             className={clsx(
               'flex items-center gap-2.5 text-sm transition-colors',
               orientation === 'vertical'
-                ? clsx('h-9 rounded-md px-3', selected ? 'bg-brand-50 font-semibold text-brand-700' : 'text-ink-muted hover:bg-hover hover:text-ink')
+                ? clsx('h-[38px] rounded-md px-4 text-[15px] text-ink', selected ? 'bg-brand-50 font-semibold' : 'hover:bg-hover')
                 : clsx('-mb-px h-10 border-b-2 px-3', selected ? 'border-brand-500 font-semibold text-ink' : 'border-transparent text-ink-muted hover:text-ink'),
             )}
           >
             {t.icon}
             <span className="flex-1 text-left">{t.label}</span>
-            {t.count !== undefined && <span className={clsx('text-xs tabular-nums', selected ? 'text-brand-700' : 'text-ink-subtle')}>{t.count}</span>}
+            {t.count !== undefined && <span className="text-xs font-normal text-ink-muted tabular-nums">{t.count.toLocaleString()}</span>}
           </button>
         );
       })}
