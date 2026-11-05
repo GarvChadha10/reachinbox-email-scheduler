@@ -1,0 +1,17 @@
+{
+  "name": "reachinbox-email-scheduler",
+  "private": true,
+  "workspaces": ["backend", "frontend"],
+  "scripts": {
+    "dev:api": "npm run dev:api -w backend",
+    "dev:worker": "npm run dev:worker -w backend",
+    "dev:web": "npm run dev -w frontend",
+    "db:migrate": "npm run db:migrate -w backend",
+    "db:seed": "npm run db:seed -w backend",
+    "es:reindex": "npm run es:reindex -w backend",
+    "test": "npm run test -w backend && npm run test -w frontend",
+    "typecheck": "npm run typecheck -w backend && npm run typecheck -w frontend",
+    "lint": "npm run lint -w backend && npm run lint -w frontend"
+  },
+  "engines": { "node": ">=20" }
+}
