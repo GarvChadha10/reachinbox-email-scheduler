@@ -325,7 +325,7 @@ Pagination is offset/limit with `{items, page, pageSize, total, totalPages}`; `p
 
 Vite + React 18 + TypeScript (strict) + Tailwind 4, React Router, TanStack Query, PapaParse, react-hot-toast, lucide-react. There's no component library.
 
-- **Matches the Figma** (`figma/`; see `frontend/DESIGN_NOTES.md` for the screen inventory and the tokens in `src/index.css`):
+- **Matches the Figma** (design tokens for colors, type, radii and shadows live in `frontend/src/index.css`):
   - Login card.
   - Sidebar with "ONB", profile card, Compose and Scheduled/Sent counts.
   - Search pill with filter and refresh.
