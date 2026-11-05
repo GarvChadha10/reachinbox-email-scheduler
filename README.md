@@ -15,7 +15,8 @@ A production-style email scheduler and dashboard. Express + BullMQ + Redis + Pos
 - **Sign in:** click **Sign up** on the login card and create an account with any email and a password (8+ characters), or use **Login with Google** (the Google app is published, so any Google account works).
 - **Try it:** Compose → upload [`samples/leads.csv`](samples/leads.csv) (15 valid addresses, plus duplicates and an invalid row to show the counters) → **Send Later** → watch the emails move from **Scheduled** to **Sent**. Each sent row links to its Ethereal preview.
 - **Slack:** profile menu → **Slack → Connect Slack** to receive the rate-limit alerts in your own workspace.
-- Hosted on one Google Cloud VM (e2-medium, Mumbai) with Docker Compose and Caddy (automatic Let's Encrypt HTTPS). The deployment is checked by `deploy/smoke-test.sh` (25/25 passing against the live URL). See [Deploying it live](#deploying-it-live-one-server-docker).
+- **Queue dashboard (Bull Board):** once signed in, profile menu → **Queue dashboard**, or open https://garvv-scheduler.duckdns.org/admin/queues. No extra password; it's read-only.
+- Hosted on one Google Cloud VM (e2-medium, Mumbai) with Docker Compose and Caddy (automatic Let's Encrypt HTTPS). The deployment is checked by `deploy/smoke-test.sh` (26/26 passing against the live URL). See [Deploying it live](#deploying-it-live-one-server-docker).
 
 ## Contents
 
@@ -44,7 +45,7 @@ Each row maps an assignment requirement to where it lives and how it was verifie
 | **Slack notification** on limit hit | Real Slack OAuth (`incoming-webhook`), encrypted webhook per user, one message per sender per hour, works after a later connect | `backend/src/modules/slack` | integration test (f), `slack:demo` (live message) |
 | Behavior under load (1000+ emails) | Chunked bulk enqueue; planner (tier 1) and Redis guard (tier 2) | §7 | `load-test` (1,120 emails, cap never exceeded) |
 | Searchable via Elasticsearch | Async indexing queue, upsert by email ID, user-scoped search, `es:reindex` | `backend/src/modules/search` | UI search, `es:reindex` |
-| Live BullMQ dashboard | Bull Board at `/admin/queues`, HTTP Basic auth | `backend/src/api/bullBoard.ts` | manual |
+| Live BullMQ dashboard | Bull Board at `/admin/queues`, open to any signed-in user, read-only | `backend/src/api/bullBoard.ts` | integration test (h), smoke test |
 
 ### Frontend
 
@@ -154,7 +155,7 @@ npm run ethereal -w backend
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | — | Google Cloud Console → Credentials → OAuth client (Web) |
 | `GOOGLE_REDIRECT_URI` | http://localhost:4000/api/auth/google/callback | register exactly this URI |
 | `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` | — | api.slack.com/apps → Basic Information |
-| `BULL_BOARD_USER`, `BULL_BOARD_PASSWORD` | — | HTTP Basic auth for `/admin/queues` (disabled if unset) |
+| `BULL_BOARD_USER`, `BULL_BOARD_PASSWORD` | — | optional: also allow HTTP Basic auth to `/admin/queues` (for curl/ops); signed-in users never need it |
 | `WORKER_CONCURRENCY` | **5** | jobs in flight per worker process |
 | `MIN_DELAY_BETWEEN_EMAILS_MS` | **2000** | minimum spacing between two sends **of the same sender** |
 | `MAX_EMAILS_PER_HOUR_PER_SENDER` | **200** | global per-sender cap per UTC hour |
@@ -188,7 +189,7 @@ The production stack (`docker-compose.prod.yml`) runs everything in containers o
    - Google client: add `https://<host>` as a JavaScript origin and `https://<host>/api/auth/google/callback` as a redirect URI, fill in **Branding**, then **Publish app** (§10).
    - Slack app: add `https://<host>/api/slack/callback` as a redirect URL.
 
-7. **Verify the live site** from your machine (25 checks; it creates one throwaway account and sends 3 emails to example.com):
+7. **Verify the live site** from your machine (26 checks; it creates one throwaway account and sends 3 emails to example.com):
    ```bash
    deploy/smoke-test.sh https://<host>
    ```
@@ -199,7 +200,7 @@ Data lives in Docker volumes, so redeploys and reboots keep it. Every container 
 ```bash
 ENV_FILE=.env.prodtest deploy/prod-e2e.sh
 ```
-This uses `SITE_ADDRESS=localhost` and `https://localhost:8443` URLs; Caddy issues a local certificate. It runs the smoke test, then kills the API and worker mid-schedule, restarts Redis, stops and starts every container (a reboot), runs two workers, takes Elasticsearch down, and forces the hourly limit. Each step checks that every email is sent exactly once and nothing is dropped. Last run: 25 + 25 checks passed.
+This uses `SITE_ADDRESS=localhost` and `https://localhost:8443` URLs; Caddy issues a local certificate. It runs the smoke test, then kills the API and worker mid-schedule, restarts Redis, stops and starts every container (a reboot), runs two workers, takes Elasticsearch down, and forces the hourly limit. Each step checks that every email is sent exactly once and nothing is dropped. Last run: every check passed.
 
 ---
 
@@ -403,7 +404,13 @@ To let **any Google account** sign in too, fill in Google Auth Platform → **Br
 
 ## 11. Bull Board
 
-The live queue dashboard is at **http://localhost:4000/admin/queues** locally and `https://<host>/admin/queues` when deployed (also reachable from the profile menu → *Queue dashboard*, through the Vite proxy). It shows the `emails`, `indexing` and `maintenance` queues: delayed jobs with their run times, active jobs, retries and failures. It's protected by HTTP Basic auth (`BULL_BOARD_USER`/`BULL_BOARD_PASSWORD`) and disabled if those are unset.
+The live queue dashboard is at **http://localhost:4000/admin/queues** locally and `https://<host>/admin/queues` when deployed (also reachable from the profile menu → *Queue dashboard*, through the Vite proxy). It shows the `emails`, `indexing` and `maintenance` queues: delayed jobs with their run times, active jobs, retries and failures. Access uses the normal site login, so reviewers need no extra password:
+- **Any signed-in user** can open it. Signed-out browsers are redirected to the login page, and signed-out API calls get 401.
+- It runs in **read-only mode**: jobs can be inspected but not retried, promoted, cleaned, paused or deleted (checked by integration test (h)).
+- Jobs carry only `{ emailId }`, so no addresses or message content are shown. The one exception is a failed job's SMTP error text, which can quote the rejected address; with Ethereal this practically never happens.
+- Optional HTTP Basic auth (`BULL_BOARD_USER`/`BULL_BOARD_PASSWORD`) also works, for scripts.
+
+Trade-off: the board shows the shared queues, not just your own jobs. Bull Board has no per-user filtering, and read-only mode plus ID-only job data keeps that safe.
 
 ---
 
@@ -488,6 +495,7 @@ npm run typecheck && npm run lint          # both packages, zero errors
 | (e) | cap 2 with 5 due jobs | 2 sent, 3 deferred into the next window, 0 failed |
 | (f) | Slack notify | one POST per sender per window under concurrency; silent without a connection; revoked webhook removed |
 | (g) | email + password auth | register, duplicate email (409), wrong password (401), login, Google-only email protected |
+| (h) | Bull Board access | signed out: redirect to login / 401; signed in: opens, every queue read-only, a pause request is refused |
 
 **End-to-end scripts.** These spawn the real API and worker as child processes and SIGKILL them:
 
@@ -505,7 +513,7 @@ Stop your own `dev:worker` before `load-test`; it runs its own dry-run worker an
 
 | Command | What it proves |
 |---|---|
-| `deploy/smoke-test.sh https://<host>` | 25 checks against a running deployment: pages, security headers, sign-up/login, OAuth redirects, schedule → send through Ethereal → search, per-user isolation. **25/25 against the live site.** |
+| `deploy/smoke-test.sh https://<host>` | 26 checks against a running deployment: pages, security headers, sign-up/login, read-only queue dashboard, OAuth redirects, schedule → send through Ethereal → search, per-user isolation. **26/26 against the live site.** |
 | `ENV_FILE=.env.prodtest deploy/prod-e2e.sh` | local only: the same Docker stack under SIGKILL, Redis restart, full stop/start, two workers, Elasticsearch down and a forced hourly limit. **25/25.** |
 
 ---
@@ -521,7 +529,7 @@ Stop your own `dev:worker` before `load-test`; it runs its own dry-run worker an
 - OAuth `state` checked: timing-safe cookie for Google, one-time Redis nonce for Slack.
 - Every query scoped by `user_id`; another user's email returns 404.
 - Slack webhook URLs encrypted at rest (AES-256-GCM) and never logged. Pino redacts credentials, cookies and webhooks; query strings (OAuth codes) are never logged.
-- Bull Board behind Basic auth (timing-safe compare).
+- Bull Board only for signed-in users and read-only (optional Basic auth uses a timing-safe compare).
 - Ethereal passwords are never returned by the API.
 - Passwords stored as salted scrypt hashes, compared in constant time.
 - `.env` and `.env.production` are git-ignored; in production only Caddy (80/443) is exposed, with HTTPS and HSTS.

@@ -36,6 +36,8 @@ export function createApp() {
     }),
   );
   // Bull Board's UI needs inline scripts/styles; give it its own relaxed CSP before helmet.
+  // It authenticates with the session cookie, so parse cookies first.
+  app.use(cookieParser());
   mountBullBoard(app);
   app.use(
     helmet({
@@ -49,7 +51,6 @@ export function createApp() {
   );
   app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
   app.use(express.json({ limit: '2mb' }));
-  app.use(cookieParser());
 
   app.use('/health', healthRouter);
 

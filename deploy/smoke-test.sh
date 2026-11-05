@@ -32,7 +32,7 @@ HDRS=$("${CURL[@]}" -D - -o /dev/null "$BASE/login")
 check "HSTS header" "echo \"\$HDRS\" | grep -qi strict-transport-security"
 check "Content-Security-Policy header" "echo \"\$HDRS\" | grep -qi content-security-policy"
 check "API rejects requests without a session (401)" "[ \"\$(code $BASE/api/emails/scheduled)\" = 401 ]"
-check "queue dashboard requires a password (401)" "[ \"\$(code $BASE/admin/queues)\" = 401 ]"
+check "queue dashboard sends signed-out visitors to login (302)" "[ \"\$(code -H 'Accept: text/html' $BASE/admin/queues)\" = 302 ]"
 
 echo "- email + password account"
 EMAIL="smoke-$(date +%s)-$RANDOM@example.com"
@@ -43,6 +43,7 @@ check "session cookie is HttpOnly + Secure + SameSite=Lax" "echo \"\$REG\" | gre
 check "/api/auth/me returns the new user" "[ \"\$(\"\${CURL[@]}\" -b \"$JAR\" $BASE/api/auth/me | json 'd[\"email\"]')\" = '$EMAIL' ]"
 check "wrong password is rejected (401)" "[ \"\$(code -X POST $BASE/api/auth/login -H 'content-type: application/json' -d '{\"email\":\"$EMAIL\",\"password\":\"wrong-password\"}')\" = 401 ]"
 check "correct password logs in (200)" "[ \"\$(code -X POST $BASE/api/auth/login -H 'content-type: application/json' -d '{\"email\":\"$EMAIL\",\"password\":\"smoke-test-pass-1\"}')\" = 200 ]"
+check "signed-in user can open the queue dashboard, read-only" "[ \"\$(code -b \"$JAR\" -H 'Accept: text/html' $BASE/admin/queues)\" = 200 ] && \"\${CURL[@]}\" -b \"$JAR\" $BASE/admin/queues/api/queues | json 'all(q[\"readOnlyMode\"] for q in d[\"queues\"])' | grep -q True"
 
 echo "- OAuth redirects point at this host"
 G=$("${CURL[@]}" -o /dev/null -w '%{redirect_url}' "$BASE/api/auth/google")
